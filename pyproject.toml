@@ -1,0 +1,13 @@
+[project]
+name = "nanotracker"
+version = "0.1.0"
+description = "Offline NanoTrack V3 video tracker using ONNX Runtime"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.26",
+    "onnxruntime-gpu[cuda,cudnn]>=1.19",
+    "opencv-python>=4.9",
+]
+
+[tool.uv]
+package = false
