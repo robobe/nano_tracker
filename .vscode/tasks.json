@@ -1,0 +1,51 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "CMake: build debug",
+      "type": "shell",
+      "command": "cmake --build --preset debug",
+      "group": {"kind": "build", "isDefault": true},
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      "label": "Run Python: CPU",
+      "type": "process",
+      "command": "uv",
+      "args": ["run", "python", "nanotracker.py", "--device", "cpu"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Run Python: CUDA",
+      "type": "process",
+      "command": "uv",
+      "args": ["run", "python", "nanotracker.py", "--device", "cuda"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Run C++: CPU",
+      "type": "process",
+      "command": "${workspaceFolder}/scripts/run_cpp.sh",
+      "args": ["--input", "${input:cppVideoPath}", "--device", "cpu"],
+      "dependsOn": "CMake: build debug",
+      "dependsOrder": "sequence",
+      "problemMatcher": []
+    },
+    {
+      "label": "Run C++: CUDA",
+      "type": "process",
+      "command": "${workspaceFolder}/scripts/run_cpp.sh",
+      "args": ["--input", "${input:cppVideoPath}", "--device", "cuda"],
+      "dependsOn": "CMake: build debug",
+      "dependsOrder": "sequence",
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    {
+      "id": "cppVideoPath",
+      "type": "promptString",
+      "description": "Local video path for the C++ tracker"
+    }
+  ]
+}

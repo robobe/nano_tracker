@@ -39,3 +39,15 @@ uv run python nanotracker.py --self-check
 ```
 
 This validates the IoU calculation without opening a UI or loading the models.
+
+## C++ application
+
+After following the [C++ dependency setup](cpp-usage.md), build and run the C++ tracker with a local video path:
+
+```bash
+cmake --preset debug
+cmake --build --preset debug
+./scripts/run_cpp.sh --input data/your-video.mp4 --device auto
+```
+
+It opens an OpenCV ROI window, then displays the tracked box, confidence, and FPS. Use `--device cpu` to force CPU or `--device cuda` to require CUDA. Run `./scripts/run_cpp.sh --self-check --device cuda` to verify C++ CUDA inference. See [C++ usage](cpp-usage.md) for system-wide CUDA installation.

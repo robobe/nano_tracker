@@ -21,6 +21,22 @@ uv run python check_cuda.py
 
 The model files are included, so running needs no network after `uv sync` has installed dependencies. See [docs/usage.md](docs/usage.md) for annotation format and GPU requirements.
 
+## C++ example
+
+The C++20 example has the same tracking model and OpenCV ROI/display loop, but uses a command-line video path:
+
+```bash
+curl -LO https://github.com/microsoft/onnxruntime/releases/download/v1.30.0/onnxruntime-linux-x64-gpu_cuda13-1.30.0.tgz
+tar -xzf onnxruntime-linux-x64-gpu_cuda13-1.30.0.tgz
+export ONNXRUNTIME_ROOT="$PWD/onnxruntime-linux-x64-gpu_cuda13-1.30.0"
+cmake --preset debug
+cmake --build --preset debug
+./scripts/run_cpp.sh --self-check --device cuda
+./scripts/run_cpp.sh --input data/your-video.mp4 --device auto
+```
+
+The launcher supplies the CUDA 13/cuDNN 9 libraries installed by `uv sync` to the C++ process. See [C++ usage](docs/cpp-usage.md) for the complete build, system-wide installation, test, and run commands.
+
 ## Attribution
 
 The vendored NanoTrack V3 models come from [HonglinChu/SiamTrackers NanoTrack](https://github.com/HonglinChu/SiamTrackers/tree/master/NanoTrack), licensed under Apache-2.0. Its license and model-change notice are in [THIRD_PARTY_LICENSES](THIRD_PARTY_LICENSES/).

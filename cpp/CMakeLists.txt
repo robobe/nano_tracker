@@ -1,0 +1,16 @@
+find_package(OpenCV REQUIRED COMPONENTS core imgproc highgui videoio)
+
+set(ONNXRUNTIME_ROOT "" CACHE PATH "Extracted ONNX Runtime Linux GPU package")
+find_path(ONNXRUNTIME_INCLUDE_DIR onnxruntime_cxx_api.h HINTS "${ONNXRUNTIME_ROOT}/include")
+find_library(ONNXRUNTIME_LIBRARY onnxruntime HINTS "${ONNXRUNTIME_ROOT}/lib")
+if(NOT ONNXRUNTIME_INCLUDE_DIR OR NOT ONNXRUNTIME_LIBRARY)
+  message(FATAL_ERROR "Set ONNXRUNTIME_ROOT to an extracted ONNX Runtime 1.30 GPU package.")
+endif()
+
+add_executable(nanotracker_cpp src/main.cpp)
+target_compile_features(nanotracker_cpp PRIVATE cxx_std_20)
+set_target_properties(nanotracker_cpp PROPERTIES CXX_EXTENSIONS OFF BUILD_RPATH "${ONNXRUNTIME_ROOT}/lib")
+target_compile_options(nanotracker_cpp PRIVATE -Wall -Wextra -Wpedantic)
+target_include_directories(nanotracker_cpp PRIVATE "${ONNXRUNTIME_INCLUDE_DIR}")
+target_link_libraries(nanotracker_cpp PRIVATE "${ONNXRUNTIME_LIBRARY}" ${OpenCV_LIBS})
+target_compile_definitions(nanotracker_cpp PRIVATE NANOTRACKER_MODELS_DIR="${PROJECT_SOURCE_DIR}/models/nanotrackv3")

@@ -1,0 +1,18 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug NanoTracker C++",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/debug/cpp/nanotracker_cpp",
+      "args": ["--input", "${input:videoPath}"],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "CMake: build debug",
+      "MIMode": "gdb"
+    }
+  ],
+  "inputs": [
+    {"id": "videoPath", "type": "promptString", "description": "Local video path"}
+  ]
+}
