@@ -5,19 +5,20 @@ import argparse
 import csv
 import sys
 import time
-import tkinter as tk
 from pathlib import Path
-from tkinter import filedialog, messagebox
 
 import cv2
 import numpy as np
-import onnxruntime as ort
 
 
 ROOT = Path(__file__).resolve().parent
 MODEL_DIR = ROOT / "models" / "nanotrackv3"
 BACKBONE = MODEL_DIR / "nanotrack_backbone.onnx"
 HEAD = MODEL_DIR / "nanotrack_head.onnx"
+RKNN_MODEL_DIR = ROOT / "models" / "nanotrackv3_rknn_rk3566"
+RKNN_TEMPLATE = RKNN_MODEL_DIR / "backbone_template.rknn"
+RKNN_SEARCH = RKNN_MODEL_DIR / "backbone_search.rknn"
+RKNN_HEAD = RKNN_MODEL_DIR / "head.rknn"
 
 CONTEXT_AMOUNT = 0.5
 EXEMPLAR_SIZE = 127
@@ -68,25 +69,56 @@ def crop(frame: np.ndarray, center: np.ndarray, output_size: int, original_size:
 
 
 class NanoTracker:
-    def __init__(self, device: str):
-        if device != "cpu" and hasattr(ort, "preload_dlls"):
-            ort.preload_dlls(directory="")
-        available = ort.get_available_providers()
-        if device == "cuda" and "CUDAExecutionProvider" not in available:
-            raise RuntimeError("CUDA was requested but CUDAExecutionProvider is unavailable")
-        providers = ["CPUExecutionProvider"] if device == "cpu" else ["CUDAExecutionProvider", "CPUExecutionProvider"]
-        if device == "auto" and "CUDAExecutionProvider" not in available:
-            providers = ["CPUExecutionProvider"]
-        self.backbone = ort.InferenceSession(BACKBONE, providers=providers)
-        self.provider = self.backbone.get_providers()[0]
-        if device == "cuda" and self.provider != "CUDAExecutionProvider":
-            raise RuntimeError("CUDA was requested but ONNX Runtime could not initialize it")
-        self.head = ort.InferenceSession(HEAD, providers=[self.provider])
+    def __init__(self, engine: str, device: str):
+        self.engine = engine
+        if engine == "onnx":
+            import onnxruntime as ort
+
+            if device != "cpu" and hasattr(ort, "preload_dlls"):
+                ort.preload_dlls(directory="")
+            available = ort.get_available_providers()
+            if device == "cuda" and "CUDAExecutionProvider" not in available:
+                raise RuntimeError("CUDA was requested but CUDAExecutionProvider is unavailable")
+            providers = ["CPUExecutionProvider"] if device == "cpu" else ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            if device == "auto" and "CUDAExecutionProvider" not in available:
+                providers = ["CPUExecutionProvider"]
+            self.backbone = ort.InferenceSession(BACKBONE, providers=providers)
+            self.provider = self.backbone.get_providers()[0]
+            if device == "cuda" and self.provider != "CUDAExecutionProvider":
+                raise RuntimeError("CUDA was requested but ONNX Runtime could not initialize it")
+            self.head = ort.InferenceSession(HEAD, providers=[self.provider])
+        else:
+            from rknnlite.api import RKNNLite
+
+            self.template_backbone = self._load_rknn(RKNNLite, RKNN_TEMPLATE)
+            self.search_backbone = self._load_rknn(RKNNLite, RKNN_SEARCH)
+            self.head = self._load_rknn(RKNNLite, RKNN_HEAD)
+            self.provider = "RKNNLite RK3566 NPU"
         coordinates = np.arange(OUTPUT_SIZE) * STRIDE - (OUTPUT_SIZE // 2) * STRIDE
         x, y = np.meshgrid(coordinates, coordinates)
         self.points = np.column_stack((x.ravel(), y.ravel())).astype(np.float32)
         window = np.outer(np.hanning(OUTPUT_SIZE), np.hanning(OUTPUT_SIZE))
         self.window = window.ravel()
+
+    @staticmethod
+    def _load_rknn(rknn_type: type, path: Path):
+        if not path.is_file():
+            raise RuntimeError(f"RKNN model is missing: {path}")
+        model = rknn_type()
+        if model.load_rknn(str(path)) != 0 or model.init_runtime() != 0:
+            raise RuntimeError(f"Cannot initialize RKNN model: {path.name}")
+        return model
+
+    def _run_backbone(self, image: np.ndarray, template: bool) -> np.ndarray:
+        if self.engine == "onnx":
+            return self.backbone.run(None, {"input": image})[0]
+        model = self.template_backbone if template else self.search_backbone
+        return model.inference(inputs=[image], data_format=["nchw"])[0]
+
+    def _run_head(self, template: np.ndarray, search: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        if self.engine == "onnx":
+            return self.head.run(None, {"input1": template, "input2": search})
+        return tuple(self.head.inference(inputs=[template, search], data_format=["nchw", "nchw"]))
 
     def initialize(self, frame: np.ndarray, box: tuple[float, float, float, float]) -> None:
         x, y, width, height = box
@@ -96,15 +128,15 @@ class NanoTracker:
         context = self.size + CONTEXT_AMOUNT * self.size.sum()
         template_size = round(np.sqrt(context[0] * context[1]))
         template = crop(frame, self.center, EXEMPLAR_SIZE, template_size, self.mean)
-        self.template = self.backbone.run(None, {"input": template})[0]
+        self.template = self._run_backbone(template, template=True)
 
     def track(self, frame: np.ndarray) -> tuple[np.ndarray, float]:
         context = self.size + CONTEXT_AMOUNT * self.size.sum()
         template_size = np.sqrt(context[0] * context[1])
         scale = EXEMPLAR_SIZE / template_size
         search = crop(frame, self.center, INSTANCE_SIZE, round(template_size * INSTANCE_SIZE / EXEMPLAR_SIZE), self.mean)
-        search_features = self.backbone.run(None, {"input": search})[0]
-        cls, loc = self.head.run(None, {"input1": self.template, "input2": search_features})
+        search_features = self._run_backbone(search, template=False)
+        cls, loc = self._run_head(self.template, search_features)
 
         logits = cls[0].reshape(2, -1).T
         scores = np.exp(logits[:, 1] - np.logaddexp(logits[:, 0], logits[:, 1]))
@@ -142,6 +174,9 @@ def draw_box(frame: np.ndarray, box: np.ndarray, color: tuple[int, int, int], la
 
 
 def choose_file(title: str, filetypes: list[tuple[str, str]]) -> str:
+    import tkinter as tk
+    from tkinter import filedialog
+
     root = tk.Tk()
     root.withdraw()
     root.attributes("-topmost", True)
@@ -150,31 +185,60 @@ def choose_file(title: str, filetypes: list[tuple[str, str]]) -> str:
     return path
 
 
-def self_check() -> None:
+def self_check(engine: str, device: str) -> None:
     assert iou(np.array([0, 0, 10, 10]), np.array([0, 0, 10, 10])) == 1.0
     assert iou(np.array([0, 0, 2, 2]), np.array([3, 3, 2, 2])) == 0.0
+    if engine == "rknn":
+        tracker = NanoTracker(engine, device)
+        frame = np.zeros((360, 640, 3), dtype=np.uint8)
+        tracker.initialize(frame, (100, 100, 80, 60))
+        _, confidence = tracker.track(frame)
+        assert np.isfinite(confidence) and 0 <= confidence <= 1
+        print(f"RKNN self-check passed using {tracker.provider}")
+
+
+def parse_roi(value: str) -> tuple[float, float, float, float]:
+    try:
+        box = tuple(float(number) for number in value.split(","))
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("ROI must be x,y,width,height") from error
+    if len(box) != 4 or box[2] <= 0 or box[3] <= 0:
+        raise argparse.ArgumentTypeError("ROI must be x,y,width,height with positive width and height")
+    return box
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--engine", choices=("onnx", "rknn"), default="onnx")
     parser.add_argument("--device", choices=("auto", "cpu", "cuda"), default="auto")
+    parser.add_argument("--input", help="local video path; omitting it opens the file chooser")
+    parser.add_argument("--roi", type=parse_roi, help="initial box: x,y,width,height")
+    parser.add_argument("--no-display", action="store_true", help="run without OpenCV windows")
     parser.add_argument("--self-check", action="store_true")
     args = parser.parse_args()
+    if args.engine == "rknn" and args.device != "auto":
+        sys.exit("--device is only valid with --engine onnx")
     if args.self_check:
-        self_check()
+        self_check(args.engine, args.device)
         return
-    if not BACKBONE.is_file() or not HEAD.is_file():
+    if args.engine == "onnx" and (not BACKBONE.is_file() or not HEAD.is_file()):
         sys.exit("NanoTrack V3 model files are missing from models/nanotrackv3/")
+    if args.no_display and (not args.input or not args.roi):
+        sys.exit("--no-display requires --input and --roi")
 
-    video_path = choose_file("Choose video", [("Video files", "*.mp4 *.avi *.mov *.mkv"), ("All files", "*.*")])
+    video_path = args.input or choose_file("Choose video", [("Video files", "*.mp4 *.avi *.mov *.mkv"), ("All files", "*.*")])
     if not video_path:
         return
     annotation_path = ""
-    root = tk.Tk()
-    root.withdraw()
-    if messagebox.askyesno("Annotations", "Load an optional annotation CSV?"):
-        annotation_path = filedialog.askopenfilename(title="Choose annotation CSV", filetypes=[("CSV files", "*.csv")])
-    root.destroy()
+    if not args.no_display:
+        import tkinter as tk
+        from tkinter import filedialog, messagebox
+
+        root = tk.Tk()
+        root.withdraw()
+        if messagebox.askyesno("Annotations", "Load an optional annotation CSV?"):
+            annotation_path = filedialog.askopenfilename(title="Choose annotation CSV", filetypes=[("CSV files", "*.csv")])
+        root.destroy()
     try:
         annotations = load_annotations(annotation_path)
     except (OSError, ValueError) as error:
@@ -185,17 +249,18 @@ def main() -> None:
     if not ok:
         sys.exit("Cannot read the selected video")
     window = "NanoTracker"
-    box = cv2.selectROI(window, frame, fromCenter=False, showCrosshair=True)
+    box = args.roi or cv2.selectROI(window, frame, fromCenter=False, showCrosshair=True)
     if not box[2] or not box[3]:
         return
     try:
-        tracker = NanoTracker(args.device)
+        tracker = NanoTracker(args.engine, args.device)
     except Exception as error:
         sys.exit(f"Cannot start ONNX Runtime: {error}")
     tracker.initialize(frame, box)
     print(f"Using {tracker.provider}")
 
     frame_index = 0
+    total_seconds = 0.0
     while True:
         started = time.perf_counter()
         ok, frame = capture.read()
@@ -203,7 +268,11 @@ def main() -> None:
             break
         frame_index += 1
         predicted, confidence = tracker.track(frame)
-        fps = 1 / (time.perf_counter() - started)
+        elapsed = time.perf_counter() - started
+        total_seconds += elapsed
+        fps = 1 / elapsed
+        if args.no_display:
+            continue
         draw_box(frame, predicted, (0, 255, 0), f"track {confidence:.2f}")
         truth = annotations.get(frame_index)
         if truth is not None:
@@ -213,7 +282,10 @@ def main() -> None:
         if cv2.waitKey(1) & 0xFF in (27, ord("q")):
             break
     capture.release()
-    cv2.destroyAllWindows()
+    if not args.no_display:
+        cv2.destroyAllWindows()
+    if frame_index:
+        print(f"Processed {frame_index} frames at {frame_index / total_seconds:.1f} FPS")
 
 
 if __name__ == "__main__":

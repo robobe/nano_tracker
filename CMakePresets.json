@@ -22,6 +22,18 @@
         "NANOTRACKER_BUILD_NCNN": "ON",
         "NCNN_ROOT": "$env{NCNN_ROOT}"
       }
+    },
+    {
+      "name": "debug-rknn",
+      "displayName": "Debug RKNN (Radxa Zero 3W)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/debug-rknn",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "NANOTRACKER_BUILD_ORT": "OFF",
+        "NANOTRACKER_BUILD_RKNN": "ON",
+        "RKNN_ROOT": "$env{RKNN_ROOT}"
+      }
     }
   ],
   "buildPresets": [
@@ -32,6 +44,10 @@
     {
       "name": "debug-ncnn",
       "configurePreset": "debug-ncnn"
+    },
+    {
+      "name": "debug-rknn",
+      "configurePreset": "debug-rknn"
     }
   ]
 }

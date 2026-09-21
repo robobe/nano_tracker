@@ -59,6 +59,26 @@ For a minimal image-classification example using NCNN's Python API, see [the Pyt
 
 Want to understand the tracker itself? Read [How NanoTrack works](docs/how-nanotrack-works.md).
 
+## Radxa Zero 3W RKNN example
+
+The headless RK3566 NPU example uses RKNN with static FP16 NanoTrack V3 models. See [Radxa Zero 3W RKNN usage](docs/radxa-zero3w-rknn.md) for host conversion, device setup, and Python/C++ commands.
+
+## Documentation
+
+- [Python usage](docs/usage.md) — GUI workflow, annotations, and ONNX Runtime CPU/CUDA setup.
+- [C++ usage](docs/cpp-usage.md) — build and run the ONNX Runtime and NCNN C++ examples.
+- [How NanoTrack works](docs/how-nanotrack-works.md) — a step-by-step explanation of the model and matching process.
+- [NCNN Python tutorial](docs/ncnn-python-tutorial.md) — minimal NCNN inference with a pretrained image model.
+- [Radxa Zero 3W RKNN usage](docs/radxa-zero3w-rknn.md) — convert models and run headless Python/C++ NPU tracking.
+
+### Saved plans
+
+- [C++ example plan](docs/cpp-example-plan.md) — add the original ONNX Runtime C++ tracker.
+- [C++ CUDA runtime plan](docs/cpp-cuda-runtime-plan.md) — make C++ CUDA provider libraries discoverable.
+- [NCNN CPU plan](docs/ncnn-cpu-plan.md) — convert NanoTrack V3 and run it through NCNN CPU.
+- [NCNN Python tutorial plan](docs/ncnn-python-tutorial-plan.md) — add the standalone NCNN Python learning example.
+- [Radxa Zero 3W RKNN plan](docs/radxa-zero3w-rknn-plan.md) — deploy static RK3566 models with headless Python and C++ runners.
+
 ## Attribution
 
 The vendored NanoTrack V3 models come from [HonglinChu/SiamTrackers NanoTrack](https://github.com/HonglinChu/SiamTrackers/tree/master/NanoTrack), licensed under Apache-2.0. Its license and model-change notice are in [THIRD_PARTY_LICENSES](THIRD_PARTY_LICENSES/).
