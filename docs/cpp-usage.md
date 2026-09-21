@@ -61,3 +61,44 @@ The self-check validates IoU and runs the backbone and head on a synthetic frame
 ```
 
 Choose the target with the OpenCV ROI window, then press Enter or Space. Press `q` or `Esc` to quit.
+
+## NCNN CPU example
+
+This independent executable uses the committed NCNN V3 model files in `models/nanotrackv3_ncnn/`. It is CPU-only and does not need CUDA, an NVIDIA driver, or ONNX Runtime. It is tested on Ubuntu 24.04 x64.
+
+Install the build dependencies and download NCNN outside this repository:
+
+```bash
+sudo apt update
+sudo apt install build-essential cmake ninja-build libopencv-dev curl unzip
+curl -LO https://github.com/Tencent/ncnn/releases/download/20260526/ncnn-20260526-ubuntu-2404-shared.zip
+unzip ncnn-20260526-ubuntu-2404-shared.zip
+export NCNN_ROOT="$PWD/ncnn-20260526-ubuntu-2404-shared"
+```
+
+`NCNN_ROOT` must contain NCNN's `include/` and `lib/` directories. Configure, build, and verify the model pipeline:
+
+```bash
+cmake --preset debug-ncnn
+cmake --build --preset debug-ncnn
+./build/debug-ncnn/cpp/nanotracker_ncnn --self-check
+```
+
+Run tracking against a local video:
+
+```bash
+./build/debug-ncnn/cpp/nanotracker_ncnn --input data/your-video.mp4
+```
+
+Select the target ROI and press Enter or Space. The preview shows the tracked box, confidence, and FPS; press `q` or Esc to quit. No output video is written.
+
+### Regenerate NCNN models
+
+The converted model files are already committed. Regenerate them only after replacing the source ONNX models:
+
+```bash
+uv tool install pnnx
+./scripts/convert_ncnn_models.sh
+```
+
+PNNX generates the converted `.param` and `.bin` files without becoming an application dependency.

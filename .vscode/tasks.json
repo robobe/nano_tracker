@@ -9,6 +9,20 @@
       "problemMatcher": ["$gcc"]
     },
     {
+      "label": "CMake: configure NCNN",
+      "type": "shell",
+      "command": "cmake --preset debug-ncnn",
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      "label": "CMake: build NCNN",
+      "type": "shell",
+      "command": "cmake --build --preset debug-ncnn",
+      "dependsOn": "CMake: configure NCNN",
+      "dependsOrder": "sequence",
+      "problemMatcher": ["$gcc"]
+    },
+    {
       "label": "Run Python: CPU",
       "type": "process",
       "command": "uv",
@@ -37,6 +51,15 @@
       "command": "${workspaceFolder}/scripts/run_cpp.sh",
       "args": ["--input", "${input:cppVideoPath}", "--device", "cuda"],
       "dependsOn": "CMake: build debug",
+      "dependsOrder": "sequence",
+      "problemMatcher": []
+    },
+    {
+      "label": "Run C++ NCNN: CPU",
+      "type": "process",
+      "command": "${workspaceFolder}/build/debug-ncnn/cpp/nanotracker_ncnn",
+      "args": ["--input", "${input:cppVideoPath}"],
+      "dependsOn": "CMake: build NCNN",
       "dependsOrder": "sequence",
       "problemMatcher": []
     }

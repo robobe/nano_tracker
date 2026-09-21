@@ -10,12 +10,28 @@
         "CMAKE_BUILD_TYPE": "Debug",
         "ONNXRUNTIME_ROOT": "$env{ONNXRUNTIME_ROOT}"
       }
+    },
+    {
+      "name": "debug-ncnn",
+      "displayName": "Debug NCNN CPU",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/debug-ncnn",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "NANOTRACKER_BUILD_ORT": "OFF",
+        "NANOTRACKER_BUILD_NCNN": "ON",
+        "NCNN_ROOT": "$env{NCNN_ROOT}"
+      }
     }
   ],
   "buildPresets": [
     {
       "name": "debug",
       "configurePreset": "debug"
+    },
+    {
+      "name": "debug-ncnn",
+      "configurePreset": "debug-ncnn"
     }
   ]
 }

@@ -37,6 +37,24 @@ cmake --build --preset debug
 
 The launcher supplies the CUDA 13/cuDNN 9 libraries installed by `uv sync` to the C++ process. See [C++ usage](docs/cpp-usage.md) for the complete build, system-wide installation, test, and run commands.
 
+## C++ NCNN CPU example
+
+The NCNN example runs the same V3 tracker on CPU and requires neither CUDA nor ONNX Runtime:
+
+```bash
+sudo apt update
+sudo apt install build-essential cmake ninja-build libopencv-dev curl unzip
+curl -LO https://github.com/Tencent/ncnn/releases/download/20260526/ncnn-20260526-ubuntu-2404-shared.zip
+unzip ncnn-20260526-ubuntu-2404-shared.zip
+export NCNN_ROOT="$PWD/ncnn-20260526-ubuntu-2404-shared"
+cmake --preset debug-ncnn
+cmake --build --preset debug-ncnn
+./build/debug-ncnn/cpp/nanotracker_ncnn --self-check
+./build/debug-ncnn/cpp/nanotracker_ncnn --input data/your-video.mp4
+```
+
+Select the object in the ROI window, then press Enter or Space. Press `q` or Esc to quit. The NCNN models are included; see [C++ usage](docs/cpp-usage.md#ncnn-cpu-example) for conversion and troubleshooting.
+
 ## Attribution
 
 The vendored NanoTrack V3 models come from [HonglinChu/SiamTrackers NanoTrack](https://github.com/HonglinChu/SiamTrackers/tree/master/NanoTrack), licensed under Apache-2.0. Its license and model-change notice are in [THIRD_PARTY_LICENSES](THIRD_PARTY_LICENSES/).

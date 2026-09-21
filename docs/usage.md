@@ -51,3 +51,16 @@ cmake --build --preset debug
 ```
 
 It opens an OpenCV ROI window, then displays the tracked box, confidence, and FPS. Use `--device cpu` to force CPU or `--device cuda` to require CUDA. Run `./scripts/run_cpp.sh --self-check --device cuda` to verify C++ CUDA inference. See [C++ usage](cpp-usage.md) for system-wide CUDA installation.
+
+## C++ NCNN CPU application
+
+The NCNN C++ app is a CPU-only alternative that needs neither ONNX Runtime nor CUDA. After installing NCNN and setting `NCNN_ROOT` as described in [C++ usage](cpp-usage.md#ncnn-cpu-example), run:
+
+```bash
+cmake --preset debug-ncnn
+cmake --build --preset debug-ncnn
+./build/debug-ncnn/cpp/nanotracker_ncnn --self-check
+./build/debug-ncnn/cpp/nanotracker_ncnn --input data/your-video.mp4
+```
+
+It uses the committed models in `models/nanotrackv3_ncnn/`, asks OpenCV to select an ROI, and displays the tracked box, confidence, and FPS. Press `q` or Esc to quit.
