@@ -55,6 +55,10 @@ cmake --build --preset debug-ncnn
 
 Select the object in the ROI window, then press Enter or Space. Press `q` or Esc to quit. The NCNN models are included; see [C++ usage](docs/cpp-usage.md#ncnn-cpu-example) for conversion and troubleshooting.
 
+For a minimal image-classification example using NCNN's Python API, see [the Python NCNN tutorial](docs/ncnn-python-tutorial.md).
+
+Want to understand the tracker itself? Read [How NanoTrack works](docs/how-nanotrack-works.md).
+
 ## Attribution
 
 The vendored NanoTrack V3 models come from [HonglinChu/SiamTrackers NanoTrack](https://github.com/HonglinChu/SiamTrackers/tree/master/NanoTrack), licensed under Apache-2.0. Its license and model-change notice are in [THIRD_PARTY_LICENSES](THIRD_PARTY_LICENSES/).

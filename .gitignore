@@ -7,3 +7,4 @@ build/
 *.pnnxsim.onnx
 *_pnnx.py
 *_ncnn.py
+ncnn_demo/assets/
