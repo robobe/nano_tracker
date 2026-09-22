@@ -7,3 +7,5 @@ python scripts/convert_rknn_models.py
 ```
 
 They are static FP16 models for Radxa Zero 3W (RK3566). Re-run conversion only after replacing the source ONNX models, then commit the regenerated files so a deployed checkout works offline.
+
+[← Return to README.md](../../README.md)

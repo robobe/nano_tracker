@@ -64,3 +64,5 @@ cmake --build --preset debug-ncnn
 ```
 
 It uses the committed models in `models/nanotrackv3_ncnn/`, asks OpenCV to select an ROI, and displays the tracked box, confidence, and FPS. Press `q` or Esc to quit.
+
+[← Return to README.md](../README.md)

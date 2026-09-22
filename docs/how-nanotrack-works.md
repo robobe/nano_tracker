@@ -188,3 +188,5 @@ When that happens, stop and select the object again. For finding an object anywh
 - `models/nanotrackv3_ncnn/` holds their converted NCNN `.param` and `.bin` files.
 
 The V3 values used here—window influence `0.455`, penalty `0.138`, and learning rate `0.348`—match the upstream V3 configuration. See the original [NanoTrack README](https://github.com/HonglinChu/SiamTrackers/tree/master/NanoTrack) and its [V3 matching-head source](https://github.com/HonglinChu/SiamTrackers/blob/master/NanoTrack/nanotrack/models/head/ban_v3.py) for the original implementation.
+
+[← Return to README.md](../README.md)

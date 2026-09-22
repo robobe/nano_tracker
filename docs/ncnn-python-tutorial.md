@@ -59,3 +59,5 @@ uv run --with ncnn python ncnn_demo/classify.py --image path/to/image.jpg
 4. The extractor accepts the input, produces 1,000 ImageNet scores, and the code prints the largest score and its label.
 
 Model assets come from the upstream [NCNN SqueezeNet example](https://github.com/nihui/ncnn-android-squeezenet); the image comes from [ImageNet sample images](https://github.com/nihui/imagenet-sample-images). The NCNN [Python API documentation](https://github.com/Tencent/ncnn/tree/master/python) describes the installed `ncnn` package.
+
+[← Return to README.md](../README.md)

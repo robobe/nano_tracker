@@ -86,3 +86,5 @@ Both runners print the average tracking FPS. Neither saves an output video.
 - **Slow or inaccurate tracker:** first confirm FP16 works. INT8 needs representative template and search crops for calibration; do not quantize the matching head blindly.
 
 Sources: [Radxa Zero 3 documentation](https://docs.radxa.com/en/zero/zero3), [Radxa RKNN installation](https://docs.radxa.com/en/rock5/rock5b/app-development/ai/rknn-install), and [Rockchip RKNN Toolkit2](https://github.com/airockchip/rknn-toolkit2).
+
+[← Return to README.md](../README.md)

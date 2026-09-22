@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Track one selected object in a local video with NanoTrack V3."""
+"""Track one selected object in a local video with NanoTrack V3.
+
+The user selects an initial box, the backbone extracts template and search features,
+and the head ranks candidate boxes on each following frame. The best candidate updates
+the tracked box, which OpenCV displays alongside optional ground-truth annotations.
+"""
 
 import argparse
 import csv
@@ -15,19 +20,15 @@ ROOT = Path(__file__).resolve().parent
 MODEL_DIR = ROOT / "models" / "nanotrackv3"
 BACKBONE = MODEL_DIR / "nanotrack_backbone.onnx"
 HEAD = MODEL_DIR / "nanotrack_head.onnx"
-RKNN_MODEL_DIR = ROOT / "models" / "nanotrackv3_rknn_rk3566"
-RKNN_TEMPLATE = RKNN_MODEL_DIR / "backbone_template.rknn"
-RKNN_SEARCH = RKNN_MODEL_DIR / "backbone_search.rknn"
-RKNN_HEAD = RKNN_MODEL_DIR / "head.rknn"
 
-CONTEXT_AMOUNT = 0.5
-EXEMPLAR_SIZE = 127
-INSTANCE_SIZE = 255
-OUTPUT_SIZE = 15
-STRIDE = 16
-WINDOW_INFLUENCE = 0.455
-PENALTY_K = 0.138
-LR = 0.348
+CONTEXT_AMOUNT = 0.5  # Extra context around the target box.
+EXEMPLAR_SIZE = 127  # Template crop size in pixels.
+INSTANCE_SIZE = 255  # Search crop size in pixels.
+OUTPUT_SIZE = 15  # Matching-head grid width and height.
+STRIDE = 16  # Input pixels represented by one output cell.
+WINDOW_INFLUENCE = 0.455  # Bias toward locations near the previous target.
+PENALTY_K = 0.138  # Penalize abrupt scale or aspect-ratio changes.
+LR = 0.348  # Update rate for the tracked box.
 
 
 def iou(a: np.ndarray, b: np.ndarray) -> float:
@@ -40,6 +41,7 @@ def iou(a: np.ndarray, b: np.ndarray) -> float:
 
 
 def load_annotations(path: str | None) -> dict[int, np.ndarray]:
+    """Load frame-indexed ground-truth boxes from an optional CSV file."""
     if not path:
         return {}
     with open(path, newline="", encoding="utf-8") as file:
@@ -56,6 +58,7 @@ def load_annotations(path: str | None) -> dict[int, np.ndarray]:
 
 
 def crop(frame: np.ndarray, center: np.ndarray, output_size: int, original_size: int, mean: np.ndarray) -> np.ndarray:
+    """Extract a padded square crop and convert it to an NCHW float tensor."""
     half = (original_size + 1) / 2
     x0, y0 = np.floor(center - half + 0.5).astype(int)
     x1, y1 = x0 + original_size - 1, y0 + original_size - 1
@@ -69,58 +72,39 @@ def crop(frame: np.ndarray, center: np.ndarray, output_size: int, original_size:
 
 
 class NanoTracker:
-    def __init__(self, engine: str, device: str):
-        self.engine = engine
-        if engine == "onnx":
-            import onnxruntime as ort
+    def __init__(self, device: str):
+        """Load ONNX models and prepare the candidate grid and motion window."""
+        import onnxruntime as ort
 
-            if device != "cpu" and hasattr(ort, "preload_dlls"):
-                ort.preload_dlls(directory="")
-            available = ort.get_available_providers()
-            if device == "cuda" and "CUDAExecutionProvider" not in available:
-                raise RuntimeError("CUDA was requested but CUDAExecutionProvider is unavailable")
-            providers = ["CPUExecutionProvider"] if device == "cpu" else ["CUDAExecutionProvider", "CPUExecutionProvider"]
-            if device == "auto" and "CUDAExecutionProvider" not in available:
-                providers = ["CPUExecutionProvider"]
-            self.backbone = ort.InferenceSession(BACKBONE, providers=providers)
-            self.provider = self.backbone.get_providers()[0]
-            if device == "cuda" and self.provider != "CUDAExecutionProvider":
-                raise RuntimeError("CUDA was requested but ONNX Runtime could not initialize it")
-            self.head = ort.InferenceSession(HEAD, providers=[self.provider])
-        else:
-            from rknnlite.api import RKNNLite
-
-            self.template_backbone = self._load_rknn(RKNNLite, RKNN_TEMPLATE)
-            self.search_backbone = self._load_rknn(RKNNLite, RKNN_SEARCH)
-            self.head = self._load_rknn(RKNNLite, RKNN_HEAD)
-            self.provider = "RKNNLite RK3566 NPU"
+        if device != "cpu" and hasattr(ort, "preload_dlls"):
+            ort.preload_dlls(directory="")
+        available = ort.get_available_providers()
+        if device == "cuda" and "CUDAExecutionProvider" not in available:
+            raise RuntimeError("CUDA was requested but CUDAExecutionProvider is unavailable")
+        providers = ["CPUExecutionProvider"] if device == "cpu" else ["CUDAExecutionProvider", "CPUExecutionProvider"]
+        if device == "auto" and "CUDAExecutionProvider" not in available:
+            providers = ["CPUExecutionProvider"]
+        self.backbone = ort.InferenceSession(BACKBONE, providers=providers)
+        self.provider = self.backbone.get_providers()[0]
+        if device == "cuda" and self.provider != "CUDAExecutionProvider":
+            raise RuntimeError("CUDA was requested but ONNX Runtime could not initialize it")
+        self.head = ort.InferenceSession(HEAD, providers=[self.provider])
         coordinates = np.arange(OUTPUT_SIZE) * STRIDE - (OUTPUT_SIZE // 2) * STRIDE
         x, y = np.meshgrid(coordinates, coordinates)
         self.points = np.column_stack((x.ravel(), y.ravel())).astype(np.float32)
         window = np.outer(np.hanning(OUTPUT_SIZE), np.hanning(OUTPUT_SIZE))
         self.window = window.ravel()
 
-    @staticmethod
-    def _load_rknn(rknn_type: type, path: Path):
-        if not path.is_file():
-            raise RuntimeError(f"RKNN model is missing: {path}")
-        model = rknn_type()
-        if model.load_rknn(str(path)) != 0 or model.init_runtime() != 0:
-            raise RuntimeError(f"Cannot initialize RKNN model: {path.name}")
-        return model
-
-    def _run_backbone(self, image: np.ndarray, template: bool) -> np.ndarray:
-        if self.engine == "onnx":
-            return self.backbone.run(None, {"input": image})[0]
-        model = self.template_backbone if template else self.search_backbone
-        return model.inference(inputs=[image], data_format=["nchw"])[0]
+    def _run_backbone(self, image: np.ndarray) -> np.ndarray:
+        """Extract features from a template or search image tensor."""
+        return self.backbone.run(None, {"input": image})[0]
 
     def _run_head(self, template: np.ndarray, search: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        if self.engine == "onnx":
-            return self.head.run(None, {"input1": template, "input2": search})
-        return tuple(self.head.inference(inputs=[template, search], data_format=["nchw", "nchw"]))
+        """Match template and search features to produce scores and box offsets."""
+        return self.head.run(None, {"input1": template, "input2": search})
 
     def initialize(self, frame: np.ndarray, box: tuple[float, float, float, float]) -> None:
+        """Store the initial box and extract its template features."""
         x, y, width, height = box
         self.center = np.array([x + (width - 1) / 2, y + (height - 1) / 2])
         self.size = np.array([width, height])
@@ -128,14 +112,15 @@ class NanoTracker:
         context = self.size + CONTEXT_AMOUNT * self.size.sum()
         template_size = round(np.sqrt(context[0] * context[1]))
         template = crop(frame, self.center, EXEMPLAR_SIZE, template_size, self.mean)
-        self.template = self._run_backbone(template, template=True)
+        self.template = self._run_backbone(template)
 
     def track(self, frame: np.ndarray) -> tuple[np.ndarray, float]:
+        """Score candidate boxes in a new frame and update the tracked box."""
         context = self.size + CONTEXT_AMOUNT * self.size.sum()
         template_size = np.sqrt(context[0] * context[1])
         scale = EXEMPLAR_SIZE / template_size
         search = crop(frame, self.center, INSTANCE_SIZE, round(template_size * INSTANCE_SIZE / EXEMPLAR_SIZE), self.mean)
-        search_features = self._run_backbone(search, template=False)
+        search_features = self._run_backbone(search)
         cls, loc = self._run_head(self.template, search_features)
 
         logits = cls[0].reshape(2, -1).T
@@ -148,9 +133,11 @@ class NanoTracker:
         boxes = np.vstack(((delta[0] + delta[2]) / 2, (delta[1] + delta[3]) / 2, delta[2] - delta[0], delta[3] - delta[1]))
 
         def change(value: np.ndarray) -> np.ndarray:
+            """Return a symmetric ratio penalty no smaller than one."""
             return np.maximum(value, 1 / value)
 
         def padded_size(width: np.ndarray, height: np.ndarray) -> np.ndarray:
+            """Calculate NanoTrack's context-padded box size."""
             pad = (width + height) / 2
             return np.sqrt((width + pad) * (height + pad))
 
@@ -168,12 +155,14 @@ class NanoTracker:
 
 
 def draw_box(frame: np.ndarray, box: np.ndarray, color: tuple[int, int, int], label: str) -> None:
+    """Draw a labeled bounding box on an OpenCV frame."""
     x, y, width, height = np.round(box).astype(int)
     cv2.rectangle(frame, (x, y), (x + width, y + height), color, 2)
     cv2.putText(frame, label, (x, max(18, y - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2)
 
 
 def choose_file(title: str, filetypes: list[tuple[str, str]]) -> str:
+    """Open a native file chooser and return the selected path."""
     import tkinter as tk
     from tkinter import filedialog
 
@@ -185,19 +174,14 @@ def choose_file(title: str, filetypes: list[tuple[str, str]]) -> str:
     return path
 
 
-def self_check(engine: str, device: str) -> None:
+def self_check() -> None:
+    """Check the bounding-box overlap helper on known cases."""
     assert iou(np.array([0, 0, 10, 10]), np.array([0, 0, 10, 10])) == 1.0
     assert iou(np.array([0, 0, 2, 2]), np.array([3, 3, 2, 2])) == 0.0
-    if engine == "rknn":
-        tracker = NanoTracker(engine, device)
-        frame = np.zeros((360, 640, 3), dtype=np.uint8)
-        tracker.initialize(frame, (100, 100, 80, 60))
-        _, confidence = tracker.track(frame)
-        assert np.isfinite(confidence) and 0 <= confidence <= 1
-        print(f"RKNN self-check passed using {tracker.provider}")
 
 
 def parse_roi(value: str) -> tuple[float, float, float, float]:
+    """Parse and validate an ``x,y,width,height`` command-line ROI."""
     try:
         box = tuple(float(number) for number in value.split(","))
     except ValueError as error:
@@ -208,20 +192,18 @@ def parse_roi(value: str) -> tuple[float, float, float, float]:
 
 
 def main() -> None:
+    """Parse options, run tracking, and display or report the result."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--engine", choices=("onnx", "rknn"), default="onnx")
     parser.add_argument("--device", choices=("auto", "cpu", "cuda"), default="auto")
     parser.add_argument("--input", help="local video path; omitting it opens the file chooser")
     parser.add_argument("--roi", type=parse_roi, help="initial box: x,y,width,height")
     parser.add_argument("--no-display", action="store_true", help="run without OpenCV windows")
     parser.add_argument("--self-check", action="store_true")
     args = parser.parse_args()
-    if args.engine == "rknn" and args.device != "auto":
-        sys.exit("--device is only valid with --engine onnx")
     if args.self_check:
-        self_check(args.engine, args.device)
+        self_check()
         return
-    if args.engine == "onnx" and (not BACKBONE.is_file() or not HEAD.is_file()):
+    if not BACKBONE.is_file() or not HEAD.is_file():
         sys.exit("NanoTrack V3 model files are missing from models/nanotrackv3/")
     if args.no_display and (not args.input or not args.roi):
         sys.exit("--no-display requires --input and --roi")
@@ -253,7 +235,7 @@ def main() -> None:
     if not box[2] or not box[3]:
         return
     try:
-        tracker = NanoTracker(args.engine, args.device)
+        tracker = NanoTracker(args.device)
     except Exception as error:
         sys.exit(f"Cannot start ONNX Runtime: {error}")
     tracker.initialize(frame, box)

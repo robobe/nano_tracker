@@ -7,3 +7,5 @@ Use RKNN Toolkit2 2.3.2 on an x86 Ubuntu 24.04/Python 3.12 host to convert and v
 Add a headless Python `--engine rknn` mode and a separate native C++ `nanotracker_rknn` executable. Both accept `--input`, `--roi x,y,width,height`, and `--no-display`, perform a real model self-check, and print average FPS. Preserve the existing ONNX and NCNN runners as fallback paths.
 
 Keep generated RK3566 artifacts under `models/nanotrackv3_rknn_rk3566/` and commit them after successful conversion so the deployed project remains offline. Document Radxa OS Debian 12 installation, NPU enablement, Python setup, C++ build, and driver/runtime troubleshooting in `docs/radxa-zero3w-rknn.md`.
+
+[← Return to README.md](../README.md)
