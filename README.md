@@ -2,6 +2,19 @@
 
 An offline, live-preview Python application for tracking one object in a local video with NanoTrack V3. It uses OpenCV for the dialogs, ROI selection, display, and preprocessing; ONNX Runtime runs the two ONNX models on CUDA when available or CPU otherwise.
 
+## Install (Ubuntu)
+
+Install the system tools used by the video converter and its GUI, then install the Python environment with [uv](https://docs.astral.sh/uv/getting-started/installation/):
+
+```bash
+sudo apt update
+sudo apt install ffmpeg python3-tk
+uv sync
+```
+
+> [!TIP]
+> You do not need to create a virtual environment yourself. `uv sync` creates `.venv` when needed and installs the locked Python dependencies into it.
+
 ## Run
 
 ```bash
