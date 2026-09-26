@@ -21,6 +21,18 @@ uv run python check_cuda.py
 
 The model files are included, so running needs no network after `uv sync` has installed dependencies. See [docs/usage.md](docs/usage.md) for annotation format and GPU requirements.
 
+## Convert an image sequence to MP4
+
+Convert a UAV123-style folder of contiguous numbered JPEG images into an MP4 for NanoTracker:
+
+```bash
+uv run python scripts/image_sequence_to_mp4.py
+```
+
+Choose the image folder and MP4 destination, then select an FPS and resolution from the editable presets in `scripts/video_presets.yaml`. `Source` keeps the original image dimensions; other resolutions preserve the aspect ratio with black letterboxing. The converter creates H.264 MP4 files.
+
+Check **Import annotations** to select an optional annotation file. It accepts either UAV123 `x,y,width,height` text rows or NanoTracker `frame,x,y,width,height` CSV, and writes a matching `<video-name>.csv` beside the MP4. Its boxes are automatically scaled and letterboxed to match the converted video. Every conversion also writes `<video-name>.json`, recording the source folder, frame count, selected FPS, source/output resolutions, and annotation paths when selected. The sequence and annotation must each have exactly one frame/row per image.
+
 ## C++ example
 
 The C++20 example has the same tracking model and OpenCV ROI/display loop, but uses a command-line video path:
@@ -78,6 +90,7 @@ The headless RK3566 NPU example uses RKNN with static FP16 NanoTrack V3 models. 
 - [NCNN CPU plan](docs/ncnn-cpu-plan.md) — convert NanoTrack V3 and run it through NCNN CPU.
 - [NCNN Python tutorial plan](docs/ncnn-python-tutorial-plan.md) — add the standalone NCNN Python learning example.
 - [Radxa Zero 3W RKNN plan](docs/radxa-zero3w-rknn-plan.md) — deploy static RK3566 models with headless Python and C++ runners.
+- [Image-sequence converter plan](docs/image-sequence-mp4-converter-plan.md) — convert UAV123 JPEG sequences and annotations to MP4/CSV.
 
 ## Attribution
 

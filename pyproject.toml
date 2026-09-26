@@ -7,6 +7,7 @@ dependencies = [
     "numpy>=1.26",
     "onnxruntime-gpu[cuda,cudnn]>=1.19",
     "opencv-python>=4.9",
+    "PyYAML>=6.0",
 ]
 
 [tool.uv]

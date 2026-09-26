@@ -1,0 +1,8 @@
+fps:
+  - 10
+  - 20
+  - 30
+resolutions:
+  - Source
+  - 640x360
+  - 1280x720
