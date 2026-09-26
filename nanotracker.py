@@ -7,8 +7,11 @@ the tracked box, which OpenCV displays alongside optional ground-truth annotatio
 """
 
 import argparse
+import base64
 import csv
+import queue
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -71,6 +74,51 @@ def crop(frame: np.ndarray, center: np.ndarray, output_size: int, original_size:
     return patch.transpose(2, 0, 1)[None].astype(np.float32)
 
 
+class KalmanBoxEstimator:
+    """Estimate a box using constant centre/size velocity."""
+
+    def __init__(self) -> None:
+        self.filter = cv2.KalmanFilter(8, 4)
+        self.filter.transitionMatrix = np.eye(8, dtype=np.float32)
+        self.filter.transitionMatrix[:4, 4:] = np.eye(4, dtype=np.float32)
+        self.filter.measurementMatrix = np.hstack((np.eye(4), np.zeros((4, 4)))).astype(np.float32)
+        self.filter.processNoiseCov = np.eye(8, dtype=np.float32) * 0.01
+        self.filter.measurementNoiseCov = np.eye(4, dtype=np.float32) * 0.1
+        self.filter.errorCovPost = np.eye(8, dtype=np.float32)
+
+    @staticmethod
+    def _state(box: np.ndarray | tuple[float, float, float, float]) -> np.ndarray:
+        x, y, width, height = box
+        return np.array([x + width / 2, y + height / 2, width, height], dtype=np.float32)
+
+    @staticmethod
+    def _box(state: np.ndarray) -> np.ndarray:
+        center_x, center_y, width, height = state[:4].ravel()
+        width, height = max(1.0, float(width)), max(1.0, float(height))
+        return np.array([center_x - width / 2, center_y - height / 2, width, height], dtype=np.float32)
+
+    def initialize(self, box: np.ndarray | tuple[float, float, float, float]) -> None:
+        state = self._state(box)
+        self.filter.statePost = np.r_[state, np.zeros(4, dtype=np.float32)].reshape(8, 1)
+
+    def predict(self) -> np.ndarray:
+        return self._box(self.filter.predict())
+
+    def correct(self, measurement: np.ndarray) -> np.ndarray:
+        return self._box(self.filter.correct(self._state(measurement).reshape(4, 1)))
+
+
+def should_correct(estimate: np.ndarray, measurement: np.ndarray, enabled: bool, threshold: float) -> bool:
+    """Return whether a low-overlap measurement should be rejected."""
+    return enabled and iou(estimate, measurement) < threshold
+
+
+def matching_annotation(video_path: str | Path) -> Path | None:
+    """Return the sibling CSV sharing the selected video's basename, when present."""
+    candidate = Path(video_path).with_suffix(".csv")
+    return candidate if candidate.is_file() else None
+
+
 class NanoTracker:
     def __init__(self, device: str):
         """Load ONNX models and prepare the candidate grid and motion window."""
@@ -113,6 +161,12 @@ class NanoTracker:
         template_size = round(np.sqrt(context[0] * context[1]))
         template = crop(frame, self.center, EXEMPLAR_SIZE, template_size, self.mean)
         self.template = self._run_backbone(template)
+
+    def reset(self, box: np.ndarray, frame: np.ndarray) -> None:
+        """Move the search state to an externally supplied box without replacing its template."""
+        x, y, width, height = box
+        self.center = np.clip(np.array([x + (width - 1) / 2, y + (height - 1) / 2]), 0, [frame.shape[1], frame.shape[0]])
+        self.size = np.clip(np.array([width, height]), 10, [frame.shape[1], frame.shape[0]])
 
     def track(self, frame: np.ndarray) -> tuple[np.ndarray, float]:
         """Score candidate boxes in a new frame and update the tracked box."""
@@ -161,19 +215,6 @@ def draw_box(frame: np.ndarray, box: np.ndarray, color: tuple[int, int, int], la
     cv2.putText(frame, label, (x, max(18, y - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2)
 
 
-def choose_file(title: str, filetypes: list[tuple[str, str]]) -> str:
-    """Open a native file chooser and return the selected path."""
-    import tkinter as tk
-    from tkinter import filedialog
-
-    root = tk.Tk()
-    root.withdraw()
-    root.attributes("-topmost", True)
-    path = filedialog.askopenfilename(title=title, filetypes=filetypes)
-    root.destroy()
-    return path
-
-
 def self_check() -> None:
     """Check the bounding-box overlap helper on known cases."""
     assert iou(np.array([0, 0, 10, 10]), np.array([0, 0, 10, 10])) == 1.0
@@ -191,8 +232,289 @@ def parse_roi(value: str) -> tuple[float, float, float, float]:
     return box
 
 
+def warm_tracker(device: str) -> NanoTracker:
+    """Load and exercise both models before the user begins drawing an ROI."""
+    tracker = NanoTracker(device)
+    frame = np.zeros((255, 255, 3), dtype=np.uint8)
+    tracker.initialize(frame, (80, 80, 64, 64))
+    tracker.track(frame)
+    return tracker
+
+
+class TrackerApp:
+    """One-window GUI for video selection, ROI selection, and live tracking."""
+
+    PREVIEW_WIDTH = 960
+    PREVIEW_HEIGHT = 540
+
+    def __init__(self, root, device: str, video_path: str | None = None) -> None:
+        import tkinter as tk
+        from tkinter import ttk
+
+        self.root, self.tk, self.ttk, self.device = root, tk, ttk, device
+        self.video_path = tk.StringVar(value=video_path or "")
+        self.annotation_path = tk.StringVar()
+        self.show_tracker = tk.BooleanVar(value=True)
+        self.show_annotations = tk.BooleanVar(value=True)
+        self.show_estimate = tk.BooleanVar(value=True)
+        self.correct_tracker = tk.BooleanVar()
+        self.threshold = tk.StringVar(value="0.20")
+        self.status = tk.StringVar(value="Warming ONNX Runtime…")
+        self.capture = None
+        self.first_frame: np.ndarray | None = None
+        self.annotations: dict[int, np.ndarray] = {}
+        self.roi: tuple[float, float, float, float] | None = None
+        self.drag_start: tuple[float, float] | None = None
+        self.roi_shape = None
+        self.frame_shape = None
+        self.preview_scale = 1.0
+        self.preview_offset = (0, 0)
+        self.photo = None
+        self.tracker: NanoTracker | None = None
+        self.estimator: KalmanBoxEstimator | None = None
+        self.running = False
+        self.paused = False
+        self.frame_index = 0
+        self.warm_results: queue.Queue[tuple[str, object]] = queue.Queue()
+
+        root.title("NanoTracker")
+        root.columnconfigure(1, weight=1)
+        root.rowconfigure(4, weight=1)
+        self._path_row("Video", self.video_path, self.choose_video, 0, "Choose video")
+        self.ttk.Label(root, text="Annotations").grid(row=1, column=0, padx=8, pady=4, sticky="w")
+        self.annotation_entry = ttk.Entry(root, textvariable=self.annotation_path)
+        self.annotation_entry.grid(row=1, column=1, padx=8, pady=4, sticky="ew")
+        self.annotation_button = ttk.Button(root, text="Choose CSV", command=self.choose_annotations)
+        self.annotation_button.grid(row=1, column=2, padx=8, pady=4)
+        controls = ttk.Frame(root)
+        controls.grid(row=2, column=0, columnspan=3, padx=8, pady=4, sticky="ew")
+        ttk.Checkbutton(controls, text="Show tracker", variable=self.show_tracker).pack(side="left")
+        ttk.Checkbutton(controls, text="Show annotation", variable=self.show_annotations).pack(side="left", padx=(12, 0))
+        ttk.Checkbutton(controls, text="Show estimate", variable=self.show_estimate).pack(side="left", padx=(12, 0))
+        ttk.Checkbutton(controls, text="Correct tracker on disagreement", variable=self.correct_tracker).pack(side="left", padx=(12, 4))
+        ttk.Label(controls, text="IoU threshold").pack(side="left", padx=(8, 4))
+        ttk.Spinbox(controls, from_=0.01, to=0.99, increment=0.01, textvariable=self.threshold, width=5).pack(side="left")
+        buttons = ttk.Frame(root)
+        buttons.grid(row=3, column=0, columnspan=3, padx=8, pady=4, sticky="e")
+        self.start_button = ttk.Button(buttons, text="Start", command=self.start, state="disabled")
+        self.start_button.pack(side="left", padx=4)
+        self.pause_button = ttk.Button(buttons, text="Pause", command=self.pause, state="disabled")
+        self.pause_button.pack(side="left", padx=4)
+        self.stop_button = ttk.Button(buttons, text="Stop", command=self.stop, state="disabled")
+        self.stop_button.pack(side="left", padx=4)
+        self.canvas = tk.Canvas(root, width=self.PREVIEW_WIDTH, height=self.PREVIEW_HEIGHT, background="black", highlightthickness=0)
+        self.canvas.grid(row=4, column=0, columnspan=3, padx=8, pady=4, sticky="nsew")
+        self.canvas.bind("<ButtonPress-1>", self.begin_roi)
+        self.canvas.bind("<B1-Motion>", self.drag_roi)
+        self.canvas.bind("<ButtonRelease-1>", self.finish_roi)
+        ttk.Label(root, textvariable=self.status).grid(row=5, column=0, columnspan=3, padx=8, pady=(0, 8), sticky="w")
+
+        threading.Thread(target=self._warm, daemon=True).start()
+        root.after(50, self.poll_warmup)
+        if video_path:
+            self.load_video()
+
+    def _path_row(self, label, variable, command, row, button_label) -> None:
+        self.ttk.Label(self.root, text=label).grid(row=row, column=0, padx=8, pady=4, sticky="w")
+        self.ttk.Entry(self.root, textvariable=variable).grid(row=row, column=1, padx=8, pady=4, sticky="ew")
+        self.ttk.Button(self.root, text=button_label, command=command).grid(row=row, column=2, padx=8, pady=4)
+
+    def _warm(self) -> None:
+        try:
+            self.warm_results.put(("ready", warm_tracker(self.device)))
+        except Exception as error:
+            self.warm_results.put(("error", error))
+
+    def poll_warmup(self) -> None:
+        try:
+            kind, value = self.warm_results.get_nowait()
+        except queue.Empty:
+            self.root.after(50, self.poll_warmup)
+            return
+        if kind == "error":
+            self.status.set(f"Cannot start ONNX Runtime: {value}")
+            return
+        self.tracker = value
+        self.status.set(f"Ready: {self.tracker.provider}. Choose a video and draw its ROI.")
+        if self.first_frame is not None:
+            self.start_button.configure(state="normal")
+
+    def choose_video(self) -> None:
+        from tkinter import filedialog
+
+        path = filedialog.askopenfilename(title="Choose video", filetypes=[("Video files", "*.mp4 *.avi *.mov *.mkv"), ("All files", "*.*")])
+        if path:
+            self.video_path.set(path)
+            self.load_video()
+
+    def choose_annotations(self) -> None:
+        from tkinter import filedialog
+
+        path = filedialog.askopenfilename(title="Choose annotation CSV", filetypes=[("CSV files", "*.csv")])
+        if path:
+            self.annotation_path.set(path)
+
+    def load_video(self) -> None:
+        from tkinter import messagebox
+
+        self.stop()
+        if self.capture:
+            self.capture.release()
+        self.capture = cv2.VideoCapture(self.video_path.get())
+        ok, self.first_frame = self.capture.read()
+        if not ok:
+            self.first_frame = None
+            messagebox.showerror("Cannot read video", "Cannot read the selected video.")
+            return
+        self.capture.set(cv2.CAP_PROP_POS_FRAMES, 1)
+        self.roi = None
+        self.frame_index = 0
+        annotation = matching_annotation(self.video_path.get())
+        self.annotation_path.set(str(annotation) if annotation else "")
+        self.show_frame(self.first_frame)
+        if self.tracker:
+            self.start_button.configure(state="normal")
+        self.status.set("Draw a box around the target, then press Start.")
+
+    def begin_roi(self, event) -> None:
+        if self.first_frame is None or self.running:
+            return
+        self.drag_start = (event.x, event.y)
+        if self.roi_shape:
+            self.canvas.delete(self.roi_shape)
+        self.roi_shape = self.canvas.create_rectangle(event.x, event.y, event.x, event.y, outline="white", width=2)
+
+    def drag_roi(self, event) -> None:
+        if self.drag_start and self.roi_shape:
+            self.canvas.coords(self.roi_shape, *self.drag_start, event.x, event.y)
+
+    def finish_roi(self, event) -> None:
+        if not self.drag_start or self.first_frame is None:
+            return
+        x0, y0 = self.drag_start
+        x1, y1 = event.x, event.y
+        self.drag_start = None
+        left, top = min(x0, x1), min(y0, y1)
+        width, height = abs(x1 - x0), abs(y1 - y0)
+        if width < 2 or height < 2:
+            self.status.set("Draw a larger target box.")
+            return
+        offset_x, offset_y = self.preview_offset
+        self.roi = ((left - offset_x) / self.preview_scale, (top - offset_y) / self.preview_scale, width / self.preview_scale, height / self.preview_scale)
+        self.status.set("ROI selected. Press Start.")
+
+    def start(self) -> None:
+        from tkinter import messagebox
+
+        if not self.tracker:
+            self.status.set("Still warming ONNX Runtime…")
+            return
+        if self.first_frame is None or not self.capture:
+            messagebox.showerror("Choose video", "Choose a readable video first.")
+            return
+        if not self.roi:
+            messagebox.showerror("Draw ROI", "Draw a box around the target first.")
+            return
+        try:
+            threshold = float(self.threshold.get())
+            if not 0 < threshold < 1:
+                raise ValueError
+            self.annotations = load_annotations(self.annotation_path.get()) if self.annotation_path.get() else {}
+        except (OSError, ValueError):
+            messagebox.showerror("Annotations or threshold", "Use a valid annotation CSV and an IoU threshold between 0 and 1.")
+            return
+        self.tracker.initialize(self.first_frame, self.roi)
+        self.estimator = KalmanBoxEstimator()
+        self.estimator.initialize(self.roi)
+        self.capture.set(cv2.CAP_PROP_POS_FRAMES, 1)
+        self.frame_index = 0
+        self.running, self.paused = True, False
+        if self.roi_shape:
+            self.canvas.delete(self.roi_shape)
+            self.roi_shape = None
+        self.start_button.configure(state="disabled")
+        self.pause_button.configure(state="normal", text="Pause")
+        self.stop_button.configure(state="normal")
+        self.status.set(f"Tracking with {self.tracker.provider}.")
+        self.root.after(1, self.track_next)
+
+    def pause(self) -> None:
+        if not self.running:
+            return
+        self.paused = not self.paused
+        self.pause_button.configure(text="Resume" if self.paused else "Pause")
+        self.status.set("Paused." if self.paused else "Tracking…")
+        if not self.paused:
+            self.root.after(1, self.track_next)
+
+    def stop(self) -> None:
+        was_running = self.running
+        self.running, self.paused = False, False
+        self.pause_button.configure(state="disabled", text="Pause")
+        self.stop_button.configure(state="disabled")
+        if self.tracker and self.first_frame is not None:
+            self.start_button.configure(state="normal")
+        if was_running:
+            self.show_frame(self.first_frame)
+            self.status.set("Stopped. Draw a new ROI or press Start to restart.")
+
+    def track_next(self) -> None:
+        if not self.running or self.paused or not self.capture or not self.tracker or not self.estimator:
+            return
+        ok, frame = self.capture.read()
+        if not ok:
+            self.stop()
+            self.status.set("Video complete.")
+            return
+        started = time.perf_counter()
+        estimate = self.estimator.predict()
+        measurement, confidence = self.tracker.track(frame)
+        corrected = should_correct(estimate, measurement, self.correct_tracker.get(), float(self.threshold.get()))
+        if corrected:
+            self.tracker.reset(estimate, frame)
+        else:
+            self.estimator.correct(measurement)
+        self.frame_index += 1
+        display = frame.copy()
+        if self.show_tracker.get():
+            draw_box(display, measurement, (0, 255, 0), f"track {confidence:.2f}")
+        if self.show_estimate.get():
+            draw_box(display, estimate, (0, 255, 255), "estimate")
+        truth = self.annotations.get(self.frame_index)
+        if truth is not None and self.show_annotations.get():
+            draw_box(display, truth, (255, 0, 0), f"truth IoU {iou(measurement, truth):.2f}")
+        elapsed = time.perf_counter() - started
+        suffix = " corrected" if corrected else ""
+        cv2.putText(display, f"FPS {1 / elapsed:.1f}{suffix}", (10, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+        self.show_frame(display)
+        self.root.after(1, self.track_next)
+
+    def show_frame(self, frame: np.ndarray) -> None:
+        height, width = frame.shape[:2]
+        self.preview_scale = min(self.PREVIEW_WIDTH / width, self.PREVIEW_HEIGHT / height)
+        preview_size = (round(width * self.preview_scale), round(height * self.preview_scale))
+        preview = cv2.resize(frame, preview_size)
+        offset_x = (self.PREVIEW_WIDTH - preview_size[0]) // 2
+        offset_y = (self.PREVIEW_HEIGHT - preview_size[1]) // 2
+        self.preview_offset = (offset_x, offset_y)
+        canvas_frame = np.zeros((self.PREVIEW_HEIGHT, self.PREVIEW_WIDTH, 3), dtype=np.uint8)
+        canvas_frame[offset_y : offset_y + preview_size[1], offset_x : offset_x + preview_size[0]] = preview
+        ok, encoded = cv2.imencode(".png", canvas_frame)
+        if not ok:
+            return
+        self.photo = self.tk.PhotoImage(data=base64.b64encode(encoded.tobytes()), format="png")
+        if self.frame_shape:
+            self.canvas.itemconfigure(self.frame_shape, image=self.photo)
+        else:
+            self.frame_shape = self.canvas.create_image(0, 0, image=self.photo, anchor="nw")
+        self.canvas.tag_lower(self.frame_shape)
+        if self.roi and not self.running:
+            x, y, width, height = self.roi
+            self.roi_shape = self.canvas.create_rectangle(x * self.preview_scale + offset_x, y * self.preview_scale + offset_y, (x + width) * self.preview_scale + offset_x, (y + height) * self.preview_scale + offset_y, outline="white", width=2)
+
+
 def main() -> None:
-    """Parse options, run tracking, and display or report the result."""
+    """Run the one-screen GUI or preserve the existing headless mode."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--device", choices=("auto", "cpu", "cuda"), default="auto")
     parser.add_argument("--input", help="local video path; omitting it opens the file chooser")
@@ -208,37 +530,23 @@ def main() -> None:
     if args.no_display and (not args.input or not args.roi):
         sys.exit("--no-display requires --input and --roi")
 
-    video_path = args.input or choose_file("Choose video", [("Video files", "*.mp4 *.avi *.mov *.mkv"), ("All files", "*.*")])
-    if not video_path:
-        return
-    annotation_path = ""
     if not args.no_display:
         import tkinter as tk
-        from tkinter import filedialog, messagebox
 
         root = tk.Tk()
-        root.withdraw()
-        if messagebox.askyesno("Annotations", "Load an optional annotation CSV?"):
-            annotation_path = filedialog.askopenfilename(title="Choose annotation CSV", filetypes=[("CSV files", "*.csv")])
-        root.destroy()
-    try:
-        annotations = load_annotations(annotation_path)
-    except (OSError, ValueError) as error:
-        sys.exit(f"Cannot load annotations: {error}")
+        TrackerApp(root, args.device, args.input)
+        root.mainloop()
+        return
 
-    capture = cv2.VideoCapture(video_path)
+    capture = cv2.VideoCapture(args.input)
     ok, frame = capture.read()
     if not ok:
         sys.exit("Cannot read the selected video")
-    window = "NanoTracker"
-    box = args.roi or cv2.selectROI(window, frame, fromCenter=False, showCrosshair=True)
-    if not box[2] or not box[3]:
-        return
     try:
         tracker = NanoTracker(args.device)
     except Exception as error:
         sys.exit(f"Cannot start ONNX Runtime: {error}")
-    tracker.initialize(frame, box)
+    tracker.initialize(frame, args.roi)
     print(f"Using {tracker.provider}")
 
     frame_index = 0
@@ -253,19 +561,7 @@ def main() -> None:
         elapsed = time.perf_counter() - started
         total_seconds += elapsed
         fps = 1 / elapsed
-        if args.no_display:
-            continue
-        draw_box(frame, predicted, (0, 255, 0), f"track {confidence:.2f}")
-        truth = annotations.get(frame_index)
-        if truth is not None:
-            draw_box(frame, truth, (255, 0, 0), f"truth IoU {iou(predicted, truth):.2f}")
-        cv2.putText(frame, f"FPS {fps:.1f}", (10, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-        cv2.imshow(window, frame)
-        if cv2.waitKey(1) & 0xFF in (27, ord("q")):
-            break
     capture.release()
-    if not args.no_display:
-        cv2.destroyAllWindows()
     if frame_index:
         print(f"Processed {frame_index} frames at {frame_index / total_seconds:.1f} FPS")
 

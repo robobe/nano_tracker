@@ -1,8 +1,8 @@
 # Usage
 
-Run the application with `uv run python nanotracker.py`. It first opens a native file chooser for a local video. The second dialog lets you skip or select an annotation CSV. OpenCV then displays the first frame; draw the target ROI and press Enter or Space to begin.
+Run the application with `uv run python nanotracker.py`. Its one-screen window lets you choose a local video, optionally select an annotation CSV, draw the target ROI directly on the preview, and start tracking.
 
-The preview is not recorded. Press `q` or `Esc` to close it.
+The preview is not recorded. Close the application window to exit.
 
 ## Devices
 
@@ -30,7 +30,7 @@ frame,x,y,width,height
 1,246,162,74,70
 ```
 
-Rows may omit frames. The application only draws a blue ground-truth box and IoU when a row exists for the displayed frame. Without annotations it still shows the green tracker box and NanoTrack confidence.
+Rows may omit frames. The application only draws a blue ground-truth box and IoU when a row exists for the displayed frame. Without annotations it still shows NanoTracker's green measurement box and confidence; the optional yellow estimate is independent of annotations.
 
 ## Check
 

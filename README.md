@@ -22,7 +22,7 @@ uv sync
 uv run python nanotracker.py
 ```
 
-Choose a video, optionally choose an annotation CSV, then drag the initial object box. Green is the tracked box and its NanoTrack confidence. When annotations exist, blue is the ground-truth box and its IoU with the tracked box. Press `q` or `Esc` to quit. Nothing is saved to disk.
+The one-screen window lets you choose a video, optionally select an annotation CSV, draw the initial object box, and start tracking. If `video.csv` exists beside `video.mp4`, it is selected automatically. **Show tracker**, **Show annotation**, and **Show estimate** independently control the green NanoTrack measurement, blue ground truth, and yellow constant-velocity Kalman estimate; all are enabled by default. The white ROI selection rectangle disappears when tracking begins. **Correct tracker on disagreement** is disabled by default; when enabled, it resets tracking to the estimate if their IoU is below the selected threshold (default `0.20`). Nothing is saved to disk.
 
 Use `--device cpu`, `--device cuda`, or the default `--device auto`. `auto` selects CUDA when it is available and otherwise uses CPU.
 
@@ -104,6 +104,7 @@ The headless RK3566 NPU example uses RKNN with static FP16 NanoTrack V3 models. 
 - [NCNN Python tutorial plan](docs/ncnn-python-tutorial-plan.md) — add the standalone NCNN Python learning example.
 - [Radxa Zero 3W RKNN plan](docs/radxa-zero3w-rknn-plan.md) — deploy static RK3566 models with headless Python and C++ runners.
 - [Image-sequence converter plan](docs/image-sequence-mp4-converter-plan.md) — convert UAV123 JPEG sequences and annotations to MP4/CSV.
+- [Kalman-estimator GUI plan](docs/kalman-estimator-gui-plan.md) — add one-screen tracking, warm-up, and estimator-based correction.
 
 ## Attribution
 
