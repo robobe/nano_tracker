@@ -1,6 +1,6 @@
 # Usage
 
-Run the application with `uv run python nanotracker.py`. Its one-screen window lets you choose a local video, optionally select an annotation CSV, draw the target ROI directly on the preview, and start tracking.
+Run the application with `uv run python nanotracker_gui.py`. Its one-screen window lets you choose a local video, optionally select an annotation CSV, draw the target ROI directly on the preview, and start tracking.
 
 The preview is not recorded. Close the application window to exit.
 
@@ -35,34 +35,9 @@ Rows may omit frames. The application only draws a blue ground-truth box and IoU
 ## Check
 
 ```bash
-uv run python nanotracker.py --self-check
+uv run python nanotracker_gui.py --self-check
 ```
 
 This validates the IoU calculation without opening a UI or loading the models.
-
-## C++ application
-
-After following the [C++ dependency setup](cpp-usage.md), build and run the C++ tracker with a local video path:
-
-```bash
-cmake --preset debug
-cmake --build --preset debug
-./scripts/run_cpp.sh --input data/your-video.mp4 --device auto
-```
-
-It opens an OpenCV ROI window, then displays the tracked box, confidence, and FPS. Use `--device cpu` to force CPU or `--device cuda` to require CUDA. Run `./scripts/run_cpp.sh --self-check --device cuda` to verify C++ CUDA inference. See [C++ usage](cpp-usage.md) for system-wide CUDA installation.
-
-## C++ NCNN CPU application
-
-The NCNN C++ app is a CPU-only alternative that needs neither ONNX Runtime nor CUDA. After installing NCNN and setting `NCNN_ROOT` as described in [C++ usage](cpp-usage.md#ncnn-cpu-example), run:
-
-```bash
-cmake --preset debug-ncnn
-cmake --build --preset debug-ncnn
-./build/debug-ncnn/cpp/nanotracker_ncnn --self-check
-./build/debug-ncnn/cpp/nanotracker_ncnn --input data/your-video.mp4
-```
-
-It uses the committed models in `models/nanotrackv3_ncnn/`, asks OpenCV to select an ROI, and displays the tracked box, confidence, and FPS. Press `q` or Esc to quit.
 
 [← Return to README.md](../README.md)

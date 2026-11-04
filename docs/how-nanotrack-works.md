@@ -20,7 +20,7 @@ These names describe different stages of getting a neural-network model ready to
 | --- | --- | --- |
 | **ONNX** | A common, portable model format—like a standard document format for AI models. | The original NanoTrack V3 `.onnx` files run with ONNX Runtime. |
 | **PNNX** | NCNN's conversion tool and its optional intermediate model representation. | It reads the ONNX models and produces NCNN-ready files. It is used during conversion, not while tracking. |
-| **NCNN** | A lightweight inference engine and its `.param` + `.bin` model format. | The C++ NCNN tracker loads the converted files and runs them on CPU. |
+| **NCNN** | A lightweight inference engine and its `.param` + `.bin` model format. | The converted files can be used with NCNN inference. |
 
 So the route in this project is:
 
@@ -182,8 +182,7 @@ When that happens, stop and select the object again. For finding an object anywh
 
 ## Where this appears in this repository
 
-- `nanotracker.py` contains the Python ONNX Runtime version.
-- `cpp/src/ncnn_main.cpp` contains the same crop, matching-output decoding, ranking, and update logic for NCNN CPU inference.
+- `nanotracker_gui.py` contains the Python ONNX Runtime version.
 - `models/nanotrackv3/` holds the two V3 ONNX models: backbone and head.
 - `models/nanotrackv3_ncnn/` holds their converted NCNN `.param` and `.bin` files.
 

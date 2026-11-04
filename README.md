@@ -2,29 +2,79 @@
 
 An offline, live-preview Python application for tracking one object in a local video with NanoTrack V3. It uses OpenCV for the dialogs, ROI selection, display, and preprocessing; ONNX Runtime runs the two ONNX models on CUDA when available or CPU otherwise.
 
-## Install (Ubuntu)
+## Install Python dependencies
 
-Install the system tools used by the video converter and its GUI, then install the Python environment with [uv](https://docs.astral.sh/uv/getting-started/installation/):
+```bash
+uv sync
+```
+
+`uv sync` creates the project environment and installs the Python packages, ONNX Runtime, and bundled model files. For ONNX CPU or CUDA, no additional Ubuntu packages are needed for headless tracking. CUDA requires a compatible NVIDIA driver and GPU; the Python environment supplies CUDA runtime libraries.
+
+## Use the library
+
+Pass the first video frame and the target box to `init()`, then call `update()` for each following frame. Boxes use `(x, y, width, height)` pixel coordinates, and each update returns a `BoundingBox` and confidence. The returned box is a named tuple rather than a NumPy array; convert it with `np.asarray(bbox)` if needed.
+
+```python
+import cv2
+from nanotracker import BoundingBox, Engine, NanoTracker
+
+video = cv2.VideoCapture("car4.mp4")
+ok, first_frame = video.read()
+if not ok:
+    raise RuntimeError("Could not read the video")
+
+# Select ONNX CPU, or use Engine.ONNX_CUDA to require CUDA.
+tracker = NanoTracker(engine=Engine.ONNX)
+# Replace these example coordinates with the target box in the first frame.
+initial_bbox = BoundingBox(x=100, y=80, width=60, height=45)
+tracker.init(first_frame, initial_bbox)
+
+ok, next_frame = video.read()
+if ok:
+    bbox, confidence = tracker.update(next_frame)
+    print(f"Box: {bbox}, confidence: {confidence:.2f}")
+
+video.release()
+```
+
+## Optional Ubuntu packages
+
+Install these only for the feature you plan to use:
 
 ```bash
 sudo apt update
-sudo apt install ffmpeg python3-tk
-uv sync
+sudo apt install python3-tk ffmpeg
 ```
 
-> [!TIP]
-> You do not need to create a virtual environment yourself. `uv sync` creates `.venv` when needed and installs the locked Python dependencies into it.
+- `python3-tk` enables the desktop GUI.
+- `ffmpeg` is only needed by the image-sequence-to-MP4 converter.
 
-## Run
+## Run the packaged example
+
+The wheel includes the `car4.mp4` sample, its matching annotations, the demo, and the ONNX models. Run the demo with the included sample:
 
 ```bash
-uv sync
-uv run python nanotracker.py
+uv run nanotracker-demo
 ```
 
-The one-screen window lets you choose a video, optionally select an annotation CSV, draw the initial object box, and start tracking. If `video.csv` exists beside `video.mp4`, it is selected automatically. **Show tracker**, **Show annotation**, and **Show estimate** independently control the green NanoTrack measurement, blue ground truth, and yellow constant-velocity Kalman estimate; all are enabled by default. The white ROI selection rectangle disappears when tracking begins. **Correct tracker on disagreement** is disabled by default; when enabled, it resets tracking to the estimate if their IoU is below the selected threshold (default `0.20`). Nothing is saved to disk.
+The window asks you to draw the initial target box. You can provide a different video and select an engine:
 
-Use `--device cpu`, `--device cuda`, or the default `--device auto`. `auto` selects CUDA when it is available and otherwise uses CPU.
+```bash
+uv run nanotracker-demo path/to/video.mp4 --engine onnx
+uv run nanotracker-demo path/to/video.mp4 --engine onnx_cuda
+```
+
+`onnx_cuda` requires ONNX Runtime's CUDA provider and a compatible NVIDIA driver/GPU. It fails clearly when CUDA is unavailable.
+
+## Run the desktop application
+
+```bash
+uv run python nanotracker_gui.py
+```
+
+Choose a video, optionally select an annotation CSV, draw the initial box, and start tracking. If `video.csv` exists beside `video.mp4`, it is selected automatically. **Show tracker**, **Show annotation**, and **Show estimate** toggle the tracker measurement, ground truth, and Kalman estimate. **Correct tracker on disagreement** can reset tracking to the estimate when their overlap drops below the selected threshold. Nothing is saved to disk.
+
+The legacy application accepts `--device cpu`, `--device cuda`, or `--device auto` (the default).
 
 Check that both models really execute on CUDA:
 
@@ -32,7 +82,7 @@ Check that both models really execute on CUDA:
 uv run python check_cuda.py
 ```
 
-The model files are included, so running needs no network after `uv sync` has installed dependencies. See [docs/usage.md](docs/usage.md) for annotation format and GPU requirements.
+See [Python usage](docs/usage.md) for annotation format and detailed GPU setup.
 
 ## Convert an image sequence to MP4
 
@@ -46,63 +96,25 @@ Choose the image folder and MP4 destination, then select an FPS and resolution f
 
 Check **Import annotations** to select an optional annotation file. It accepts either UAV123 `x,y,width,height` text rows or NanoTracker `frame,x,y,width,height` CSV, and writes a matching `<video-name>.csv` beside the MP4. Its boxes are automatically scaled and letterboxed to match the converted video. Every conversion also writes `<video-name>.json`, recording the source folder, frame count, selected FPS, source/output resolutions, and annotation paths when selected. The sequence and annotation must each have exactly one frame/row per image.
 
-## C++ example
-
-The C++20 example has the same tracking model and OpenCV ROI/display loop, but uses a command-line video path:
-
-```bash
-curl -LO https://github.com/microsoft/onnxruntime/releases/download/v1.30.0/onnxruntime-linux-x64-gpu_cuda13-1.30.0.tgz
-tar -xzf onnxruntime-linux-x64-gpu_cuda13-1.30.0.tgz
-export ONNXRUNTIME_ROOT="$PWD/onnxruntime-linux-x64-gpu_cuda13-1.30.0"
-cmake --preset debug
-cmake --build --preset debug
-./scripts/run_cpp.sh --self-check --device cuda
-./scripts/run_cpp.sh --input data/your-video.mp4 --device auto
-```
-
-The launcher supplies the CUDA 13/cuDNN 9 libraries installed by `uv sync` to the C++ process. See [C++ usage](docs/cpp-usage.md) for the complete build, system-wide installation, test, and run commands.
-
-## C++ NCNN CPU example
-
-The NCNN example runs the same V3 tracker on CPU and requires neither CUDA nor ONNX Runtime:
-
-```bash
-sudo apt update
-sudo apt install build-essential cmake ninja-build libopencv-dev curl unzip
-curl -LO https://github.com/Tencent/ncnn/releases/download/20260526/ncnn-20260526-ubuntu-2404-shared.zip
-unzip ncnn-20260526-ubuntu-2404-shared.zip
-export NCNN_ROOT="$PWD/ncnn-20260526-ubuntu-2404-shared"
-cmake --preset debug-ncnn
-cmake --build --preset debug-ncnn
-./build/debug-ncnn/cpp/nanotracker_ncnn --self-check
-./build/debug-ncnn/cpp/nanotracker_ncnn --input data/your-video.mp4
-```
-
-Select the object in the ROI window, then press Enter or Space. Press `q` or Esc to quit. The NCNN models are included; see [C++ usage](docs/cpp-usage.md#ncnn-cpu-example) for conversion and troubleshooting.
-
 For a minimal image-classification example using NCNN's Python API, see [the Python NCNN tutorial](docs/ncnn-python-tutorial.md).
 
 Want to understand the tracker itself? Read [How NanoTrack works](docs/how-nanotrack-works.md).
 
 ## Radxa Zero 3W RKNN example
 
-The headless RK3566 NPU example uses RKNN with static FP16 NanoTrack V3 models. See [Radxa Zero 3W RKNN usage](docs/radxa-zero3w-rknn.md) for host conversion, device setup, and Python/C++ commands.
+The headless RK3566 NPU example uses RKNN with static FP16 NanoTrack V3 models. See [Radxa Zero 3W RKNN usage](docs/radxa-zero3w-rknn.md) for host conversion, device setup, and Python commands.
 
 ## Documentation
 
 - [Python usage](docs/usage.md) — GUI workflow, annotations, and ONNX Runtime CPU/CUDA setup.
-- [C++ usage](docs/cpp-usage.md) — build and run the ONNX Runtime and NCNN C++ examples.
 - [How NanoTrack works](docs/how-nanotrack-works.md) — a step-by-step explanation of the model and matching process.
 - [NCNN Python tutorial](docs/ncnn-python-tutorial.md) — minimal NCNN inference with a pretrained image model.
-- [Radxa Zero 3W RKNN usage](docs/radxa-zero3w-rknn.md) — convert models and run headless Python/C++ NPU tracking.
+- [Radxa Zero 3W RKNN usage](docs/radxa-zero3w-rknn.md) — convert models and run headless Python NPU tracking.
 
 ### Saved plans
 
-- [C++ example plan](docs/cpp-example-plan.md) — add the original ONNX Runtime C++ tracker.
-- [C++ CUDA runtime plan](docs/cpp-cuda-runtime-plan.md) — make C++ CUDA provider libraries discoverable.
-- [NCNN CPU plan](docs/ncnn-cpu-plan.md) — convert NanoTrack V3 and run it through NCNN CPU.
 - [NCNN Python tutorial plan](docs/ncnn-python-tutorial-plan.md) — add the standalone NCNN Python learning example.
-- [Radxa Zero 3W RKNN plan](docs/radxa-zero3w-rknn-plan.md) — deploy static RK3566 models with headless Python and C++ runners.
+- [Radxa Zero 3W RKNN plan](docs/radxa-zero3w-rknn-plan.md) — deploy static RK3566 models with headless Python runners.
 - [Image-sequence converter plan](docs/image-sequence-mp4-converter-plan.md) — convert UAV123 JPEG sequences and annotations to MP4/CSV.
 - [Kalman-estimator GUI plan](docs/kalman-estimator-gui-plan.md) — add one-screen tracking, warm-up, and estimator-based correction.
 

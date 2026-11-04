@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 data/
 build/
+dist/
 *.pnnx.*
 *.pnnxsim.onnx
 *_pnnx.py

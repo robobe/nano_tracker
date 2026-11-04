@@ -14,7 +14,7 @@ sudo rsetup
 sudo reboot
 sudo apt update
 sudo apt install rknpu2-rk356x python3-opencv python3-numpy \
-  build-essential cmake ninja-build libopencv-dev git
+  git
 sudo dmesg | grep 'Initialized rknpu'
 ```
 
@@ -55,34 +55,17 @@ cd /path/to/nano_tracker
 uv venv --system-site-packages --python /usr/bin/python3 .venv
 uv pip install --python .venv/bin/python \
   /path/to/rknn-toolkit2/rknn-toolkit-lite2/packages/rknn_toolkit_lite2-2.3.2-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl
-.venv/bin/python nanotracker.py --engine rknn --self-check
-.venv/bin/python nanotracker.py --engine rknn --input data/video.mp4 \
+.venv/bin/python nanotracker_gui.py --engine rknn --self-check
+.venv/bin/python nanotracker_gui.py --engine rknn --input data/video.mp4 \
   --roi 100,100,80,60 --no-display
 ```
 
 `--no-display` intentionally requires a local video and an initial `x,y,width,height` ROI. It does not use Tk or OpenCV windows, so it works through SSH.
 
-## 4. Build and run the C++ runner on Zero 3W
-
-The C++ API header and `librknnrt.so` come from the same Toolkit2 checkout. Build natively on the board:
-
-```bash
-cd /path/to/nano_tracker
-export RKNN_ROOT=/path/to/rknn-toolkit2/rknpu2/runtime/Linux/librknn_api
-cmake --preset debug-rknn
-cmake --build --preset debug-rknn
-./build/debug-rknn/cpp/nanotracker_rknn --self-check
-./build/debug-rknn/cpp/nanotracker_rknn --input data/video.mp4 \
-  --roi 100,100,80,60 --no-display
-```
-
-Both runners print the average tracking FPS. Neither saves an output video.
-
 ## Troubleshooting
 
 - **`rknpu` is absent:** use an official Zero 3W image, enable the NPU in `rsetup`, then reboot. `rknpu2-rk356x` is the correct package for RK3566.
 - **`No module named rknnlite`:** install the ARM64 Lite2 wheel matching `python3 --version`; do not install the x86 Toolkit2 wheel on the board.
-- **`librknnrt.so` error:** keep `RKNN_ROOT` pointed at the Toolkit2 `librknn_api` directory while configuring/building C++, and use a Runtime/Lite2 version compatible with the model's Toolkit2 version.
 - **Slow or inaccurate tracker:** first confirm FP16 works. INT8 needs representative template and search crops for calibration; do not quantize the matching head blindly.
 
 Sources: [Radxa Zero 3 documentation](https://docs.radxa.com/en/zero/zero3), [Radxa RKNN installation](https://docs.radxa.com/en/rock5/rock5b/app-development/ai/rknn-install), and [Rockchip RKNN Toolkit2](https://github.com/airockchip/rknn-toolkit2).
