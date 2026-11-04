@@ -2,6 +2,14 @@
   "version": "2.0.0",
   "tasks": [
     {
+      "label": "Python: Build CPU wheel",
+      "type": "process",
+      "command": "uv",
+      "args": ["run", "--no-sync", "python", "scripts/build_cpu_wheel.py"],
+      "options": {"cwd": "${workspaceFolder}"},
+      "problemMatcher": []
+    },
+    {
       "label": "Python: Build RK3566 wheel",
       "type": "process",
       "command": "uv",
