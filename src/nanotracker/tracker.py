@@ -12,15 +12,21 @@ class Engine(Enum):
     ONNX = "onnx"
     ONNX_CUDA = "onnx_cuda"
     NCNN = "ncnn"
+    RK3566 = "rk3566"
 
 
 class NanoTracker:
     """Track one object from OpenCV BGR images and ``(x, y, width, height)`` boxes."""
 
-    def __init__(self, engine: Engine = Engine.ONNX, model_path: str | Path | None = None):
+    def __init__(self, engine: Engine = Engine.RK3566, model_path: str | Path | None = None):
         if not isinstance(engine, Engine):
             raise TypeError("engine must be an Engine value")
-        if engine in (Engine.ONNX, Engine.ONNX_CUDA):
+        if engine == Engine.RK3566:
+            from .engines.rk3566 import RK3566Engine
+            packaged = Path(__file__).parent / "models" / "nanotrackv3_rknn_rk3566"
+            checkout = Path(__file__).resolve().parents[2] / "models" / "nanotrackv3_rknn_rk3566"
+            self.engine = RK3566Engine(Path(model_path) if model_path else packaged if packaged.is_dir() else checkout)
+        elif engine in (Engine.ONNX, Engine.ONNX_CUDA):
             from .engines.onnx import ONNXEngine
             if model_path:
                 model_dir = Path(model_path)

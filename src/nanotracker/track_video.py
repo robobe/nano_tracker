@@ -14,7 +14,7 @@ def main():
     parser.add_argument("--version", action="version", version=f"NanoTracker {version()}")
     sample_video = Path(nanotracker.__file__).parent / "demo_data" / "car4.mp4"
     parser.add_argument("video", nargs="?", default=str(sample_video))
-    parser.add_argument("--engine", choices=[engine.name.lower() for engine in Engine], default="onnx")
+    parser.add_argument("--engine", choices=[engine.name.lower() for engine in Engine], default="rk3566")
     parser.add_argument("--model-path", help="external directory containing engine model files")
     args = parser.parse_args()
     print(f"NanoTracker {version()}")

@@ -1,6 +1,6 @@
 # NanoTracker
 
-An offline, live-preview Python application for tracking one object in a local video with NanoTrack V3. It uses OpenCV for the dialogs, ROI selection, display, and preprocessing; ONNX Runtime runs the two ONNX models on CUDA when available or CPU otherwise.
+An offline, live-preview Python application for tracking one object in a local video with NanoTrack V3. It uses OpenCV for the dialogs, ROI selection, display, and preprocessing; RKNN Lite2 runs the models on the RK3566 NPU.
 
 ## Install Python dependencies
 
@@ -8,7 +8,7 @@ An offline, live-preview Python application for tracking one object in a local v
 uv sync
 ```
 
-`uv sync` creates the project environment and installs the Python packages, ONNX Runtime, and bundled model files. For ONNX CPU or CUDA, no additional Ubuntu packages are needed for headless tracking. CUDA requires a compatible NVIDIA driver and GPU; the Python environment supplies CUDA runtime libraries.
+`uv sync` creates the project environment and installs the Python packages, and bundled RK3566 model files. Install RKNN Lite2 separately as shown below.
 
 ## Use the library
 
@@ -23,8 +23,8 @@ ok, first_frame = video.read()
 if not ok:
     raise RuntimeError("Could not read the video")
 
-# Select ONNX CPU, or use Engine.ONNX_CUDA to require CUDA.
-tracker = NanoTracker(engine=Engine.ONNX)
+# Select the RK3566 NPU engine.
+tracker = NanoTracker(engine=Engine.RK3566)
 # Replace these example coordinates with the target box in the first frame.
 initial_bbox = BoundingBox(x=100, y=80, width=60, height=45)
 tracker.init(first_frame, initial_bbox)
@@ -37,52 +37,17 @@ if ok:
 video.release()
 ```
 
-## Optional Ubuntu packages
+## RK3566 installation and example
 
-Install these only for the feature you plan to use:
-
-```bash
-sudo apt update
-sudo apt install python3-tk ffmpeg
-```
-
-- `python3-tk` enables the desktop GUI.
-- `ffmpeg` is only needed by the image-sequence-to-MP4 converter.
-
-## Run the packaged example
-
-The wheel includes the `car4.mp4` sample, its matching annotations, the demo, and the ONNX models. Run the demo with the included sample:
+On a Radxa Zero 3W, enable the NPU and install the board driver (`rknpu2-rk356x`). Install the RKNN Toolkit Lite2 wheel matching your ARM64 Python version from the [Rockchip Toolkit2 repository](https://github.com/airockchip/rknn-toolkit2):
 
 ```bash
-uv run nanotracker-demo
+uv sync
+uv pip install /path/to/rknn_toolkit_lite2-2.3.2-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl
+uv run --no-sync nanotracker-demo --engine rk3566
 ```
 
-The window asks you to draw the initial target box. You can provide a different video and select an engine:
-
-```bash
-uv run nanotracker-demo path/to/video.mp4 --engine onnx
-uv run nanotracker-demo path/to/video.mp4 --engine onnx_cuda
-```
-
-`onnx_cuda` requires ONNX Runtime's CUDA provider and a compatible NVIDIA driver/GPU. It fails clearly when CUDA is unavailable.
-
-## Run the desktop application
-
-```bash
-uv run python nanotracker_gui.py
-```
-
-Choose a video, optionally select an annotation CSV, draw the initial box, and start tracking. If `video.csv` exists beside `video.mp4`, it is selected automatically. **Show tracker**, **Show annotation**, and **Show estimate** toggle the tracker measurement, ground truth, and Kalman estimate. **Correct tracker on disagreement** can reset tracking to the estimate when their overlap drops below the selected threshold. Nothing is saved to disk.
-
-The legacy application accepts `--device cpu`, `--device cuda`, or `--device auto` (the default).
-
-Check that both models really execute on CUDA:
-
-```bash
-uv run python check_cuda.py
-```
-
-See [Python usage](docs/usage.md) for annotation format and detailed GPU setup.
+The Lite2 wheel name above is for Python 3.11; use the matching wheel for your board. `--no-sync` preserves the separately installed Lite2 package. See [RK3566 setup](docs/radxa-zero3w-rknn.md) for NPU setup. The packaged RKNN models target RK3566.
 
 ## Convert an image sequence to MP4
 
